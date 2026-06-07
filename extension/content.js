@@ -97,6 +97,12 @@ function setOverlayText(text, mode = 'subtitle') {
   el.querySelector('.ua-subs-text').textContent = text;
 }
 
+// Mark the player container so CSS can hide the platform's own captions.
+// Called only once a translation is ready (so we never hide English for nothing).
+function suppressNativeCaptions() {
+  overlayEl?.parentElement?.classList.add('ua-subs-active');
+}
+
 function applySettings() {
   if (!overlayEl) return;
   overlayEl.style.display = settings.enabled ? '' : 'none';
@@ -139,6 +145,7 @@ chrome.runtime.onMessage.addListener((msg) => {
       uaCues = parseSRT(msg.srt);
       console.log(`[ua-subs] Ready: ${uaCues.length} cues`);
       setOverlayText('', 'subtitle');
+      suppressNativeCaptions();
       attachToVideo();
       break;
 
@@ -171,6 +178,7 @@ chrome.runtime.sendMessage({ type: 'CONTENT_READY' }, (resp) => {
     console.log(`[ua-subs] Ready (synced): ${uaCues.length} cues`);
     ensureOverlay();
     setOverlayText('', 'subtitle');
+    suppressNativeCaptions();
     attachToVideo();
   } else if (resp.status === 'error') {
     ensureOverlay();

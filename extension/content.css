@@ -53,3 +53,11 @@
 /* Fullscreen: font scales with vw automatically since we use vw units.
    When the .plyr (our container) goes fullscreen the vw unit refers to
    the fullscreen viewport — no extra rules needed. */
+
+/* Once our UA overlay is live, suppress the platform's own caption rendering
+   (e.g. Video.js .vjs-text-track-display) so the original-language text doesn't
+   double up with the translation. The class is added to the player container
+   only after a translation is ready, so English still shows if we have nothing. */
+.ua-subs-active .vjs-text-track-display {
+  display: none !important;
+}

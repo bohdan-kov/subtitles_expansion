@@ -42,8 +42,10 @@ Open any lesson on a supported platform (e.g.
 [frontendmasters.com](https://frontendmasters.com)).
 Ukrainian subtitles appear automatically when the video loads (~10s first time, instant from cache).
 
-> **FrontendMasters note:** captions are fetched from `captions.frontendmasters.com`.
-> If subtitles don't appear, enable **CC** in the player so the page requests the `.vtt` track.
+> **FrontendMasters note:** captions are fetched from `captions.frontendmasters.com`
+> only once CC is enabled. The extension enables it automatically (in `hidden`
+> mode, so no English text shows) via `inject.js` — a MAIN-world script for
+> Video.js sites flagged `autoCaptions` in `sites.js`. No manual CC needed.
 
 ## Adding another platform
 

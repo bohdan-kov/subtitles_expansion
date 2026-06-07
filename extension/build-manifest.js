@@ -37,6 +37,20 @@ const manifest = {
       css: ['content.css'],
       run_at: 'document_idle',
     },
+    // MAIN-world script for sites that fetch their subtitle track only on CC
+    // enable (autoCaptions). Omitted entirely if no site needs it.
+    ...(() => {
+      const autoSites = SUPPORTED_SITES.filter((s) => s.autoCaptions);
+      if (!autoSites.length) return [];
+      return [
+        {
+          matches: unique(autoSites.flatMap((s) => s.pageMatches)),
+          js: ['inject.js'],
+          world: 'MAIN',
+          run_at: 'document_idle',
+        },
+      ];
+    })(),
   ],
 
   action: {

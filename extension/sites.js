@@ -19,6 +19,10 @@
  *   player          CSS selector(s) for the element the overlay lives inside;
  *                   MUST survive fullscreen. First match wins.
  *   video           CSS selector(s) for the <video> element. First match wins.
+ *   autoCaptions    (optional) true for Video.js sites that only fetch their
+ *                   subtitle track once CC is enabled. Adds a MAIN-world script
+ *                   (inject.js) that turns the track on in `hidden` mode so the
+ *                   .vtt is fetched without showing the original text.
  */
 const SUPPORTED_SITES = [
   {
@@ -38,6 +42,7 @@ const SUPPORTED_SITES = [
     trackUrls: ['*://captions.frontendmasters.com/*.vtt'],
     player: ['.video-js'],
     video: ['video.vjs-tech'],
+    autoCaptions: true, // Video.js fetches the .vtt only when CC is enabled
   },
 ];
 
