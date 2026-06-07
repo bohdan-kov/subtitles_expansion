@@ -1,0 +1,455 @@
+1
+00:00:00,031 --> 00:00:02,875
+In this module, we are going to examine how we access Claude
+
+2
+00:00:03,015 --> 00:00:05,578
+and use it to generate some text. To help you understand how
+
+3
+00:00:05,618 --> 00:00:08,403
+this works, I'm going to walk you through the full lifecycle of requests
+
+4
+00:00:08,423 --> 00:00:11,006
+to the Anthropic API. We are going to also take
+
+5
+00:00:11,086 --> 00:00:13,710
+a brief look at what is going on behind the scenes inside
+
+6
+00:00:13,750 --> 00:00:16,274
+of Claude. To get started with this walkthrough, we
+
+7
+00:00:16,314 --> 00:00:18,937
+are going to consider a straightforward, standard chatbot
+
+8
+00:00:19,077 --> 00:00:21,721
+app. Let's imagine that you are building a web app and
+
+9
+00:00:21,780 --> 00:00:25,025
+want to show a chat window to a user in the web browser.
+
+10
+00:00:25,006 --> 00:00:27,510
+When the user enters a message and clicks send, their
+
+11
+00:00:27,631 --> 00:00:30,315
+expectation is that some response will just magically
+
+12
+00:00:30,376 --> 00:00:33,140
+appear. Like I said, I want to examine what
+
+13
+00:00:33,201 --> 00:00:35,746
+is going on behind the scenes here to generate this text
+
+14
+00:00:35,966 --> 00:00:38,530
+and display it on the screen. We are going to break this
+
+15
+00:00:38,570 --> 00:00:41,435
+down into five separate steps. which I've outlined
+
+16
+00:00:41,536 --> 00:00:44,098
+at the top of this diagram. And we're going to walk through each
+
+17
+00:00:44,139 --> 00:00:46,862
+step one by one. When a user enters some text
+
+18
+00:00:47,023 --> 00:00:49,545
+and clicks send, that text is going to be sent off
+
+19
+00:00:49,566 --> 00:00:52,570
+to a server that you, the developer, implement. I
+
+20
+00:00:52,630 --> 00:00:55,353
+mentioned this step just to make one thing clear. You
+
+21
+00:00:55,393 --> 00:00:57,996
+should not attempt to access the Anthropic API
+
+22
+00:00:58,277 --> 00:01:00,981
+directly from a web or mobile app. Whenever
+
+23
+00:01:01,000 --> 00:01:03,685
+you make a request to the API, you are required to include
+
+24
+00:01:03,704 --> 00:01:06,209
+a secret API key. And the best way
+
+25
+00:01:06,269 --> 00:01:08,813
+to make sure that this key stays secret is by never
+
+26
+00:01:08,894 --> 00:01:11,597
+including it inside of your client-side app, and only
+
+27
+00:01:11,659 --> 00:01:14,602
+making a request to the API through a server that you implement.
+
+28
+00:01:15,385 --> 00:01:18,168
+On to step two. Once your server has received a request
+
+29
+00:01:18,189 --> 00:01:20,813
+from the client, the server will make a request directly
+
+30
+00:01:20,853 --> 00:01:23,498
+to the Anthropic API. Usually, you'll
+
+31
+00:01:23,539 --> 00:01:26,405
+make this request through one of the SDKs that Anthropic
+
+32
+00:01:26,444 --> 00:01:29,150
+has published. There are official SDK
+
+33
+00:01:29,212 --> 00:01:31,998
+implementations for Python, TypeScript, JavaScript,
+
+34
+00:01:32,138 --> 00:01:34,703
+Go, and Ruby. Now you don't have to use an
+
+35
+00:01:34,864 --> 00:01:37,390
+SDK if you don't want to. You can also make a
+
+36
+00:01:37,489 --> 00:01:40,355
+plain HTTP request if you wish.
+
+37
+00:01:40,335 --> 00:01:43,222
+When you make this request, you are required to pass along several
+
+38
+00:01:43,263 --> 00:01:45,968
+pieces of data. In particular, you need to include
+
+39
+00:01:46,009 --> 00:01:48,575
+an API key, the name of the model you wish
+
+40
+00:01:48,594 --> 00:01:51,120
+to run, a list of messages, which will include the
+
+41
+00:01:51,200 --> 00:01:54,108
+text that your user submitted, and a max tokens
+
+42
+00:01:54,147 --> 00:01:56,853
+value, which limits the length of the text that Claude
+
+43
+00:01:56,875 --> 00:01:59,780
+will generate. Next up is the Anthropic API,
+
+44
+00:01:59,900 --> 00:02:02,584
+which is where our text will actually be generated. This
+
+45
+00:02:02,644 --> 00:02:05,408
+is where we are going to go into a little bit of detail on the text
+
+46
+00:02:05,447 --> 00:02:08,312
+generation process within the language model. This
+
+47
+00:02:08,352 --> 00:02:11,055
+process is complex, so I'm going to give you a simplified
+
+48
+00:02:11,094 --> 00:02:13,618
+high-level overview. We are going to break down the
+
+49
+00:02:13,739 --> 00:02:16,483
+text generation process into four separate stages.
+
+50
+00:02:17,084 --> 00:02:19,747
+In the first stage, the user's input will be broken down
+
+51
+00:02:19,888 --> 00:02:22,491
+into smaller strings. Each of these text chunks
+
+52
+00:02:22,611 --> 00:02:25,256
+are referred to as a token. These tokens can
+
+53
+00:02:25,295 --> 00:02:28,040
+be whole words, or a part of word, or even a space
+
+54
+00:02:28,161 --> 00:02:30,925
+or a symbol. To keep things clear, we are going to assume
+
+55
+00:02:30,966 --> 00:02:33,990
+that each word forms one single token. Each
+
+56
+00:02:34,070 --> 00:02:36,914
+token is then converted into an embedding. An embedding
+
+57
+00:02:36,935 --> 00:02:39,580
+is a long list of numbers, and you could think of these lists
+
+58
+00:02:39,719 --> 00:02:42,463
+as being like a number-based definition of a given
+
+59
+00:02:42,524 --> 00:02:45,247
+word. Now, an interesting aspect of written language
+
+60
+00:02:45,407 --> 00:02:48,372
+is that a single word can have many possible meanings, and
+
+61
+00:02:48,391 --> 00:02:50,935
+it is only the word's position in a sentence and
+
+62
+00:02:50,995 --> 00:02:53,717
+presence of other words around it that narrows the definition
+
+63
+00:02:53,758 --> 00:02:56,801
+down to one particular meaning. For example, quantum
+
+64
+00:02:56,943 --> 00:02:59,485
+is a word that has many different definitions, and when
+
+65
+00:02:59,526 --> 00:03:02,269
+we see this word, we don't really know what it means
+
+66
+00:03:02,288 --> 00:03:04,831
+until we see other words around it. Likewise,
+
+67
+00:03:04,891 --> 00:03:07,735
+each embedding can be thought of as containing all possible
+
+68
+00:03:07,776 --> 00:03:10,338
+meanings of each word. to refine each embedding
+
+69
+00:03:10,378 --> 00:03:13,103
+down to a single precise definition, a process known
+
+70
+00:03:13,263 --> 00:03:15,765
+as contextualization is used.
+
+71
+00:03:15,786 --> 00:03:18,389
+In contextualization, each embedding is adjusted
+
+72
+00:03:18,430 --> 00:03:21,152
+based upon other embeddings around it. This
+
+73
+00:03:21,193 --> 00:03:23,695
+process helps highlight the meaning of each embedding that
+
+74
+00:03:23,735 --> 00:03:26,300
+makes the most sense given its neighbors. The last
+
+75
+00:03:26,340 --> 00:03:28,883
+step is generation, which is where the text actually
+
+76
+00:03:28,902 --> 00:03:31,646
+gets written. By this point, each of the embeddings has
+
+77
+00:03:31,667 --> 00:03:34,210
+absorbed a tremendous amount of information from their neighbors.
+
+78
+00:03:34,751 --> 00:03:37,495
+The final processed embeddings are then passed to an output layer,
+
+79
+00:03:37,836 --> 00:03:40,598
+which produces probabilities for each possible next
+
+80
+00:03:40,639 --> 00:03:43,143
+word. Now, the model doesn't automatically
+
+81
+00:03:43,223 --> 00:03:45,967
+pick the highest probability. Instead, it uses
+
+82
+00:03:45,986 --> 00:03:48,531
+a mix of probability and randomness to select
+
+83
+00:03:48,570 --> 00:03:52,116
+words, which helps create more natural and varied responses.
+
+84
+00:03:52,096 --> 00:03:54,699
+The selected word is then added onto the end of our
+
+85
+00:03:54,758 --> 00:03:57,423
+list of embeddings and the entire process repeats itself
+
+86
+00:03:57,562 --> 00:04:00,225
+all over. After generating each output token, the
+
+87
+00:04:00,246 --> 00:04:02,889
+model will then pause and ask itself several questions
+
+88
+00:04:02,949 --> 00:04:05,772
+to decide if it is done generating text. First,
+
+89
+00:04:05,893 --> 00:04:08,675
+it will count the number of tokens it has generated and
+
+90
+00:04:08,717 --> 00:04:11,319
+see if it is larger than the max tokens parameter
+
+91
+00:04:11,599 --> 00:04:14,122
+that was provided with the input request. This
+
+92
+00:04:14,323 --> 00:04:17,107
+max tokens parameter will limit the total number of tokens
+
+93
+00:04:17,146 --> 00:04:19,970
+that the model will generate. There is also a special
+
+94
+00:04:20,209 --> 00:04:23,072
+end of sequence token that the model can generate. This
+
+95
+00:04:23,153 --> 00:04:25,776
+is not a regular word. It is a special signal
+
+96
+00:04:25,855 --> 00:04:28,738
+that the model uses to indicate that it has reached what it considers
+
+97
+00:04:28,778 --> 00:04:31,300
+to be a natural end to its generation and that it should
+
+98
+00:04:31,341 --> 00:04:34,223
+stop. Once the generation is complete, the API
+
+99
+00:04:34,264 --> 00:04:36,826
+will send response back to your server. The response
+
+100
+00:04:36,846 --> 00:04:39,408
+will contain a message which has the generated text
+
+101
+00:04:39,468 --> 00:04:41,990
+inside it, along with usage and stop reason.
+
+102
+00:04:42,411 --> 00:04:45,053
+The usage is a count of the number of tokens that you fed
+
+103
+00:04:45,093 --> 00:04:48,057
+into the model and the number of tokens that were generated.
+
+104
+00:04:48,036 --> 00:04:50,581
+The stop reason will tell you exactly why the model
+
+105
+00:04:50,620 --> 00:04:53,165
+decided to stop generating text, whether it hits
+
+106
+00:04:53,225 --> 00:04:56,050
+a natural end of sequence token, or maybe it exceeded
+
+107
+00:04:56,110 --> 00:04:58,654
+the allotted number of tokens. Once your server
+
+108
+00:04:58,714 --> 00:05:01,220
+has received this response, it will send the generated
+
+109
+00:05:01,300 --> 00:05:03,803
+text back to your web or mobile app, where you
+
+110
+00:05:03,824 --> 00:05:07,209
+will display it on a screen. So that is the entire flow.
+
+111
+00:05:07,189 --> 00:05:09,720
+Now, we covered many topics in this video. I
+
+112
+00:05:09,759 --> 00:05:12,550
+don't expect you to memorize any of this just yet. The
+
+113
+00:05:12,651 --> 00:05:15,622
+only goal is to start to get you familiar with some common terminology
+
+114
+00:05:15,663 --> 00:05:18,312
+around accessing Claude through the API.

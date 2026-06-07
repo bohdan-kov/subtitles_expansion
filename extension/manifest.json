@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Course Subtitles UA",
+  "version": "0.4.0",
+  "description": "Ukrainian translation subtitles for online video courses",
+  "permissions": [
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "*://*.skilljar.com/*",
+    "*://assets-jpcust.jwpsrv.com/*",
+    "*://frontendmasters.com/*",
+    "*://captions.frontendmasters.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.skilljar.com/*",
+        "*://frontendmasters.com/*"
+      ],
+      "js": [
+        "sites.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Course Subtitles UA"
+  }
+}

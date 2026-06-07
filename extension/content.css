@@ -1,0 +1,55 @@
+/* UA Subtitles overlay — appended inside .plyr or .jwplayer */
+
+#ua-subs-overlay {
+  position: absolute;
+  bottom: 12%;        /* above the control bar (~48px + some breathing room) */
+  left: 0;
+  right: 0;
+  text-align: center;
+  z-index: 10;        /* above video/poster, below .plyr__controls */
+  pointer-events: none;
+  user-select: none;
+  padding: 0 4%;
+  box-sizing: border-box;
+}
+
+#ua-subs-overlay .ua-subs-text {
+  display: inline-block;
+  max-width: 85%;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 1.4vw;
+  line-height: 1.45;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.72);
+  border-radius: 3px;
+  padding: 3px 8px;
+  text-shadow: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Empty text — hide the background box */
+#ua-subs-overlay .ua-subs-text:empty {
+  background: transparent;
+  padding: 0;
+}
+
+/* Loading state */
+#ua-subs-overlay[data-mode="loading"] .ua-subs-text {
+  background: rgba(30, 30, 30, 0.85);
+  color: #ccc;
+  font-size: 1vw;
+  font-style: italic;
+}
+
+/* Error state */
+#ua-subs-overlay[data-mode="error"] .ua-subs-text {
+  background: rgba(180, 30, 30, 0.88);
+  color: #fff;
+  font-size: 0.95vw;
+  max-width: 95%;
+}
+
+/* Fullscreen: font scales with vw automatically since we use vw units.
+   When the .plyr (our container) goes fullscreen the vw unit refers to
+   the fullscreen viewport — no extra rules needed. */
