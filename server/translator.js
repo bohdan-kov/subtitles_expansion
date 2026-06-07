@@ -12,6 +12,19 @@ const MAX_INPUT_CHARS = 4500;
 
 const SYSTEM_PROMPT = `You are a subtitle translator. Translate to Ukrainian. Keep technical terms in English. Return ONLY a raw JSON array [{id,text}], no explanation, no markdown.`;
 
+// The model sometimes double-escapes line breaks, so a literal "\n" (backslash + n)
+// survives JSON.parse and shows up as text in the overlay. Turn such literal escape
+// sequences back into real characters.
+function cleanText(t) {
+  if (typeof t !== 'string') return t;
+  return t
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\t/g, ' ')
+    .trim();
+}
+
 function buildUserMessage(cues) {
   const slim = cues.map(c => ({ id: c.id, text: c.text }));
   return JSON.stringify(slim);
@@ -110,7 +123,7 @@ async function translateBatch(cues, isRetry = false) {
         }
       }
 
-      const byId = new Map(parsed.map(p => [String(p.id), p.text]));
+      const byId = new Map(parsed.map(p => [String(p.id), cleanText(p.text)]));
       const translated = cues.map(orig => ({
         ...orig,
         text: byId.get(String(orig.id)) ?? orig.text,
@@ -122,7 +135,7 @@ async function translateBatch(cues, isRetry = false) {
           console.warn(`[translator] ⚠ ${missed.length} cues not matched by id — retrying missed separately…`);
           try {
             const retried = await translateBatch(missed, true);
-            const retriedById = new Map(retried.map(r => [String(r.id), r.text]));
+            const retriedById = new Map(retried.map(r => [String(r.id), cleanText(r.text)]));
             const merged = translated.map(t => ({
               ...t,
               text: retriedById.has(String(t.id)) ? retriedById.get(String(t.id)) : t.text,
