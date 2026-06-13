@@ -22,6 +22,93 @@ function getState(tabId) {
   return tabState.get(tabId);
 }
 
+// ── Per-video job registry (drives the popup's progress list) ─────────────────
+// Keyed by track URL so each intercepted subtitle file is one independent job.
+// jobs: url → { url, name, tabId, tabTitle, status, pct, error, cues, startedAt, updatedAt }
+const jobs = new Map();
+
+// Derive a friendly label from a track URL (decoded filename, sans extension).
+function jobName(url) {
+  try {
+    const last = decodeURIComponent(new URL(url).pathname.split('/').pop() || '');
+    return last.replace(/\.(srt|vtt)$/i, '') || url;
+  } catch {
+    return url;
+  }
+}
+
+// Best-effort page title for context in the list (which course/lesson the
+// subtitle belongs to). Resolves to '' if the tab is gone.
+function getTabTitle(tabId) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.get(tabId, (tab) => {
+        resolve(chrome.runtime.lastError ? '' : tab?.title || '');
+      });
+    } catch {
+      resolve('');
+    }
+  });
+}
+
+// Create or update a job, stamping updatedAt so the popup can sort by recency.
+function upsertJob(url, patch) {
+  const prev = jobs.get(url) || {
+    url,
+    name: jobName(url),
+    tabId: null,
+    tabTitle: '',
+    status: 'translating',
+    pct: 0,
+    error: null,
+    cues: 0,
+    startedAt: Date.now(),
+  };
+  const job = { ...prev, ...patch, updatedAt: Date.now() };
+  jobs.set(url, job);
+  return job;
+}
+
+// Active jobs float to the top, then errors, then finished — recent first within
+// each group.
+function jobSort(a, b) {
+  const rank = (s) => (s === 'translating' ? 0 : s === 'error' ? 1 : 2);
+  return rank(a.status) - rank(b.status) || b.updatedAt - a.updatedAt;
+}
+
+function deleteTabJobs(tabId) {
+  for (const [url, job] of jobs) {
+    if (job.tabId === tabId) jobs.delete(url);
+  }
+}
+
+// Reflect a tab's translation state on the toolbar icon with a compact badge:
+//   N  (orange) — N active translations · ✓ (green) — finished · ! (red) — error
+// Per-tab so each course tab shows only its own state; no badge when idle.
+function refreshBadge(tabId) {
+  if (typeof tabId !== 'number' || tabId < 0) return;
+  let active = 0, done = 0, error = 0;
+  for (const job of jobs.values()) {
+    if (job.tabId !== tabId) continue;
+    if (job.status === 'translating') active++;
+    else if (job.status === 'error') error++;
+    else if (job.status === 'done') done++;
+  }
+
+  let text = '', color = '#c04a00';
+  if (active > 0) text = String(active);
+  else if (error > 0) { text = '!'; color = '#e74c3c'; }
+  else if (done > 0) { text = '✓'; color = '#27ae60'; }
+
+  try {
+    chrome.action.setBadgeText({ tabId, text });
+    if (text) {
+      chrome.action.setBadgeBackgroundColor({ tabId, color });
+      chrome.action.setBadgeTextColor?.({ tabId, color: '#ffffff' });
+    }
+  } catch {}
+}
+
 // ── English detection (same heuristic as before) ─────────────────────────────
 
 function looksEnglish(rawSRT) {
@@ -71,6 +158,15 @@ async function processURL(tabId, url) {
     console.log('[bg] Translating:', url);
     state.status = 'translating';
     state.pct = 0;
+    upsertJob(url, {
+      tabId,
+      tabTitle: await getTabTitle(tabId),
+      status: 'translating',
+      pct: 0,
+      error: null,
+      startedAt: Date.now(),
+    });
+    refreshBadge(tabId);
     notify({ type: 'TRANSLATION_START' });
 
     // 3. Send to local translation server (SSE stream)
@@ -106,12 +202,19 @@ async function processURL(tabId, url) {
           if (currentEvent === 'progress') {
             const pct = Math.round(data.done / data.total * 100);
             state.pct = pct;
+            upsertJob(url, { status: 'translating', pct });
             notify({ type: 'TRANSLATION_PROGRESS', pct });
           } else if (currentEvent === 'result') {
             state.done.add(url);
             state.inProgress.delete(url);
             state.status = 'done';
             state.srt = data.srt;
+            upsertJob(url, {
+              status: 'done',
+              pct: 100,
+              cues: (data.srt.match(/-->/g) || []).length,
+            });
+            refreshBadge(tabId);
             notify({ type: 'TRANSLATED_SRT', srt: data.srt });
             console.log('[bg] Done:', url);
             return;
@@ -127,6 +230,12 @@ async function processURL(tabId, url) {
     state.inProgress.delete(url);
     state.status = 'error';
     state.error = err.message;
+    // Only surface a job entry if we'd already committed to translating this
+    // track — a fetch/skip failure before that shouldn't litter the list.
+    if (jobs.has(url)) {
+      upsertJob(url, { status: 'error', error: err.message });
+      refreshBadge(tabId);
+    }
     console.error('[bg] Error:', err.message);
     notify({ type: 'TRANSLATION_ERROR', error: err.message });
   }
@@ -135,6 +244,25 @@ async function processURL(tabId, url) {
 // ── Sync state to content script on init ─────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Popup: fetch the live job list for the progress view.
+  if (msg.type === 'GET_JOBS') {
+    sendResponse({ jobs: [...jobs.values()].sort(jobSort) });
+    return false;
+  }
+  // Popup: drop finished/errored jobs, keep anything still translating.
+  if (msg.type === 'CLEAR_FINISHED_JOBS') {
+    const affected = new Set();
+    for (const [url, job] of jobs) {
+      if (job.status !== 'translating') {
+        affected.add(job.tabId);
+        jobs.delete(url);
+      }
+    }
+    affected.forEach(refreshBadge);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.type !== 'CONTENT_READY') return false;
   const tabId = sender.tab?.id;
   if (!tabId) return false;
@@ -165,7 +293,19 @@ chrome.webRequest.onBeforeRequest.addListener(
 // ── Cleanup on navigation / tab close ────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') tabState.delete(tabId);
+  if (changeInfo.status === 'loading') {
+    tabState.delete(tabId);
+    // Keep in-flight translations — they continue in the background across
+    // navigation, so dropping them here would hide a download that's still
+    // running. Only clear this tab's already-finished/errored jobs.
+    for (const [url, job] of jobs) {
+      if (job.tabId === tabId && job.status !== 'translating') jobs.delete(url);
+    }
+    refreshBadge(tabId);
+  }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => tabState.delete(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabState.delete(tabId);
+  deleteTabJobs(tabId);
+});

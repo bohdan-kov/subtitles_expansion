@@ -8,7 +8,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      width: 280px;
+      width: 320px;
       font-family: Arial, Helvetica, sans-serif;
       font-size: 13px;
       color: #1a1a1a;
@@ -69,6 +69,80 @@
 
     .status-text { font-size: 11px; color: #666; }
 
+    /* ── Jobs list ─────────────────────────────────────────────────────────── */
+    .jobs-head {
+      padding-bottom: 4px;
+    }
+    .clear-btn {
+      background: none; border: none; cursor: pointer;
+      color: #c04a00; font-size: 11px; padding: 0;
+    }
+    .clear-btn:hover { text-decoration: underline; }
+
+    .jobs-list {
+      display: flex; flex-direction: column; gap: 7px;
+      max-height: 280px; overflow-y: auto;
+      margin-top: 2px;
+    }
+    .jobs-empty {
+      font-size: 11px; color: #aaa; text-align: center;
+      padding: 14px 0;
+    }
+
+    .job {
+      background: #fff; border: 1px solid #ececec;
+      border-radius: 8px; padding: 8px 10px;
+      animation: jobIn 0.18s ease;
+    }
+    @keyframes jobIn { from { opacity: 0; transform: translateY(-3px); } }
+
+    .job-top { display: flex; align-items: center; gap: 7px; }
+    .job-name {
+      flex: 1; font-weight: bold; font-size: 12px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .job-meta {
+      font-size: 11px; font-variant-numeric: tabular-nums;
+      flex-shrink: 0; color: #c04a00; font-weight: bold;
+    }
+    .job.done .job-meta { color: #27ae60; }
+    .job.error .job-meta { color: #e74c3c; }
+
+    .job-sub {
+      font-size: 10px; color: #999; margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .job.error .job-sub { color: #e74c3c; }
+
+    /* Progress bar (only while translating) */
+    .bar {
+      height: 5px; background: #eee; border-radius: 3px;
+      margin-top: 7px; overflow: hidden;
+    }
+    .bar > i {
+      display: block; height: 100%; width: 0;
+      background: #c04a00; border-radius: 3px;
+      transition: width 0.35s ease;
+    }
+    .job.done .bar, .job.error .bar { display: none; }
+
+    /* Status icon */
+    .job-icon { width: 14px; height: 14px; flex-shrink: 0; position: relative; }
+    .job.translating .job-icon {
+      border: 2px solid #f0d8c8; border-top-color: #c04a00;
+      border-radius: 50%; box-sizing: border-box;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .job.done .job-icon, .job.error .job-icon {
+      border-radius: 50%; color: #fff; font-size: 10px; line-height: 14px;
+      text-align: center; font-weight: bold;
+    }
+    .job.done .job-icon { background: #27ae60; }
+    .job.done .job-icon::after { content: '✓'; }
+    .job.error .job-icon { background: #e74c3c; }
+    .job.error .job-icon::after { content: '!'; }
+
     /* Mode selector */
     select {
       font-size: 12px; border: 1px solid #ddd;
@@ -115,6 +189,16 @@
         <span class="status-dot checking" id="statusDot"></span>
         <span class="status-text" id="statusText">перевірка…</span>
       </span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="row jobs-head">
+      <span class="label">Завантаження субтитрів</span>
+      <button class="clear-btn" id="clearJobs" hidden>Очистити</button>
+    </div>
+    <div class="jobs-list" id="jobsList">
+      <div class="jobs-empty" id="jobsEmpty">Немає активних завантажень</div>
     </div>
   </div>
 
