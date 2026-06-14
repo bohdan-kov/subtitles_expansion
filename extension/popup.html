@@ -147,8 +147,10 @@
     select {
       font-size: 12px; border: 1px solid #ddd;
       border-radius: 4px; padding: 3px 6px; cursor: pointer;
-      background: #fff;
+      background: #fff; max-width: 60%;
     }
+
+    .row .label { flex-shrink: 0; }
 
     footer {
       padding: 8px 14px;
@@ -178,6 +180,14 @@
       <select id="modeSelect">
         <option value="ua">Лише UA</option>
         <option value="bilingual">EN + UA</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <span class="label">Відображення</span>
+      <select id="layoutSelect">
+        <option value="triple">3 рівні</option>
+        <option value="single">1 рядок</option>
       </select>
     </div>
   </div>

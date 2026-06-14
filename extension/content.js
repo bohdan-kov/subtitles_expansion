@@ -8,8 +8,8 @@ const SITE = siteForUrl(location.href);
 
 let uaCues = null;       // Array<{id, startSec, endSec, text}>
 let overlayEl = null;
-let lastCueId = null;
-let settings = { enabled: true, mode: 'ua' };
+let lastWindowSig = null; // signature of the last rendered prev|cur|next window
+let settings = { enabled: true, mode: 'ua', layout: 'triple' };
 
 // First element matching any selector in the list, or null.
 function firstMatch(selectors) {
@@ -50,17 +50,25 @@ function toSeconds(ts) {
   return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseInt(ms) / 1000;
 }
 
-// ── Active cue lookup (binary search) ───────────────────────────────────────
+// ── Cue window lookup (binary search) ────────────────────────────────────────
 
-function findActiveCue(cues, t) {
-  let lo = 0, hi = cues.length - 1;
+// Returns the indices of the three cues to display: the one that already
+// passed (prev), the one active right now (cur, -1 during a gap between cues),
+// and the upcoming one (next). This drives the 3-level overlay so the viewer
+// can read ahead and catch up.
+function findCueWindow(cues, t) {
+  let lo = 0, hi = cues.length - 1, active = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     if (cues[mid].endSec < t) lo = mid + 1;
     else if (cues[mid].startSec > t) hi = mid - 1;
-    else return cues[mid];
+    else { active = mid; break; }
   }
-  return null;
+  // Active cue found → neighbours are its siblings.
+  if (active !== -1) return { prev: active - 1, cur: active, next: active + 1 };
+  // In a gap: `lo` is the first cue starting after t (upcoming), `lo - 1`
+  // is the last cue that already finished. No bright current line.
+  return { prev: lo - 1, cur: -1, next: lo };
 }
 
 // ── Overlay DOM ──────────────────────────────────────────────────────────────
@@ -81,6 +89,17 @@ function ensureOverlay() {
   overlayEl = document.createElement('div');
   overlayEl.id = OVERLAY_ID;
 
+  // 3-level subtitle stack: previous (dim) · current (bright) · next (dim).
+  const stack = document.createElement('div');
+  stack.className = 'ua-subs-stack';
+  for (const level of ['prev', 'current', 'next']) {
+    const line = document.createElement('span');
+    line.className = `ua-subs-line ua-subs-${level}`;
+    stack.appendChild(line);
+  }
+  overlayEl.appendChild(stack);
+
+  // Single line reused for loading / progress / error status messages.
   const textEl = document.createElement('span');
   textEl.className = 'ua-subs-text';
   overlayEl.appendChild(textEl);
@@ -90,11 +109,22 @@ function ensureOverlay() {
   return overlayEl;
 }
 
-function setOverlayText(text, mode = 'subtitle') {
+// Status messages (loading / progress / error) — hides the subtitle stack.
+function setOverlayText(text, mode = 'loading') {
   const el = ensureOverlay();
   if (!el) return;
   el.dataset.mode = mode;
   el.querySelector('.ua-subs-text').textContent = text;
+}
+
+// 3-level subtitle display — shows the stack and hides the status line.
+function setSubtitleLevels(prev, cur, next) {
+  const el = ensureOverlay();
+  if (!el) return;
+  el.dataset.mode = 'subtitle';
+  el.querySelector('.ua-subs-prev').textContent = prev || '';
+  el.querySelector('.ua-subs-current').textContent = cur || '';
+  el.querySelector('.ua-subs-next').textContent = next || '';
 }
 
 // Mark the player container so CSS can hide the platform's own captions.
@@ -106,6 +136,8 @@ function suppressNativeCaptions() {
 function applySettings() {
   if (!overlayEl) return;
   overlayEl.style.display = settings.enabled ? '' : 'none';
+  // 'triple' → prev · current · next; 'single' → current only (CSS hides the rest).
+  overlayEl.dataset.layout = settings.layout || 'triple';
 }
 
 // ── Video attachment ─────────────────────────────────────────────────────────
@@ -120,11 +152,15 @@ function attachToVideo() {
 
   video.addEventListener('timeupdate', () => {
     if (!uaCues || !overlayEl || !settings.enabled) return;
-    const cue = findActiveCue(uaCues, video.currentTime);
-    const id = cue?.id ?? null;
-    if (id === lastCueId) return;
-    lastCueId = id;
-    setOverlayText(cue?.text ?? '', 'subtitle');
+    const w = findCueWindow(uaCues, video.currentTime);
+    const sig = `${w.prev}|${w.cur}|${w.next}`;
+    if (sig === lastWindowSig) return;
+    lastWindowSig = sig;
+    setSubtitleLevels(
+      uaCues[w.prev]?.text,
+      uaCues[w.cur]?.text,
+      uaCues[w.next]?.text
+    );
   });
 }
 
@@ -144,7 +180,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     case 'TRANSLATED_SRT':
       uaCues = parseSRT(msg.srt);
       console.log(`[ua-subs] Ready: ${uaCues.length} cues`);
-      setOverlayText('', 'subtitle');
+      setSubtitleLevels('', '', '');
       suppressNativeCaptions();
       attachToVideo();
       break;
@@ -157,6 +193,7 @@ chrome.runtime.onMessage.addListener((msg) => {
     case 'SETTINGS':
       if (msg.enabled !== undefined) settings.enabled = msg.enabled;
       if (msg.mode !== undefined) settings.mode = msg.mode;
+      if (msg.layout !== undefined) settings.layout = msg.layout;
       applySettings();
       break;
   }
@@ -164,7 +201,10 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 
-chrome.storage.sync.get({ enabled: true, mode: 'ua' }, (s) => { settings = s; });
+chrome.storage.sync.get({ enabled: true, mode: 'ua', layout: 'triple' }, (s) => {
+  settings = s;
+  applySettings();
+});
 
 // Ask background for current translation state (handles race where .srt was
 // requested before this content script was ready to receive messages)
@@ -177,7 +217,7 @@ chrome.runtime.sendMessage({ type: 'CONTENT_READY' }, (resp) => {
     uaCues = parseSRT(resp.srt);
     console.log(`[ua-subs] Ready (synced): ${uaCues.length} cues`);
     ensureOverlay();
-    setOverlayText('', 'subtitle');
+    setSubtitleLevels('', '', '');
     suppressNativeCaptions();
     attachToVideo();
   } else if (resp.status === 'error') {

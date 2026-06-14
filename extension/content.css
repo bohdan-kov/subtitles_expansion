@@ -13,8 +13,75 @@
   box-sizing: border-box;
 }
 
-#ua-subs-overlay .ua-subs-text {
+/* ── 3-level subtitle stack ───────────────────────────────────────────────────
+   prev (already passed) · current (active) · next (upcoming).
+   The current line is bright and large; prev/next are dimmed and smaller so the
+   viewer can read ahead and catch up without the active line being crowded. */
+#ua-subs-overlay .ua-subs-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35em;
+}
+
+/* Hide the stack while a status message is showing. */
+#ua-subs-overlay:not([data-mode="subtitle"]) .ua-subs-stack {
+  display: none;
+}
+
+/* Single-line layout — show only the active line. */
+#ua-subs-overlay[data-layout="single"] .ua-subs-prev,
+#ua-subs-overlay[data-layout="single"] .ua-subs-next {
+  display: none;
+}
+
+#ua-subs-overlay .ua-subs-line {
   display: inline-block;
+  max-width: 90%;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.4;
+  border-radius: 4px;
+  padding: 2px 9px;
+  text-shadow: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: opacity 0.22s ease, color 0.22s ease, background 0.22s ease;
+}
+
+/* Empty levels collapse so the layout hugs whatever is present. */
+#ua-subs-overlay .ua-subs-line:empty {
+  display: none;
+}
+
+/* Current — the actual timecode: prominent, fully opaque. */
+#ua-subs-overlay .ua-subs-current {
+  font-size: 1.5vw;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.78);
+}
+
+/* Previous & next — context: smaller, translucent, muted. */
+#ua-subs-overlay .ua-subs-prev,
+#ua-subs-overlay .ua-subs-next {
+  font-size: 1.02vw;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(0, 0, 0, 0.42);
+}
+
+/* What already passed is the dimmest. */
+#ua-subs-overlay .ua-subs-prev {
+  opacity: 0.5;
+}
+
+/* What's coming next stays a touch more readable so you can read ahead. */
+#ua-subs-overlay .ua-subs-next {
+  opacity: 0.72;
+}
+
+/* ── Status messages (loading / progress / error) ─────────────────────────────
+   Reuse a single line, shown only when not in subtitle mode. */
+#ua-subs-overlay .ua-subs-text {
+  display: none;
   max-width: 85%;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 1.4vw;
@@ -28,10 +95,8 @@
   word-break: break-word;
 }
 
-/* Empty text — hide the background box */
-#ua-subs-overlay .ua-subs-text:empty {
-  background: transparent;
-  padding: 0;
+#ua-subs-overlay:not([data-mode="subtitle"]) .ua-subs-text {
+  display: inline-block;
 }
 
 /* Loading state */

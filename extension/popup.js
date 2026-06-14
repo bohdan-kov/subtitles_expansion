@@ -4,6 +4,7 @@ const SERVER_HEALTH = 'http://127.0.0.1:17382/health';
 
 const enabledToggle = document.getElementById('enabledToggle');
 const modeSelect = document.getElementById('modeSelect');
+const layoutSelect = document.getElementById('layoutSelect');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const jobsList = document.getElementById('jobsList');
@@ -12,9 +13,10 @@ const clearJobsBtn = document.getElementById('clearJobs');
 
 // ── Load saved settings ──────────────────────────────────────────────────────
 
-chrome.storage.sync.get({ enabled: true, mode: 'ua' }, (settings) => {
+chrome.storage.sync.get({ enabled: true, mode: 'ua', layout: 'triple' }, (settings) => {
   enabledToggle.checked = settings.enabled;
   modeSelect.value = settings.mode;
+  layoutSelect.value = settings.layout;
 });
 
 // ── Save on change ───────────────────────────────────────────────────────────
@@ -36,6 +38,16 @@ modeSelect.addEventListener('change', () => {
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (tab?.id) {
       chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS', mode }).catch(() => {});
+    }
+  });
+});
+
+layoutSelect.addEventListener('change', () => {
+  const layout = layoutSelect.value;
+  chrome.storage.sync.set({ layout });
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (tab?.id) {
+      chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS', layout }).catch(() => {});
     }
   });
 });
