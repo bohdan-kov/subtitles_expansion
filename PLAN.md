@@ -166,6 +166,36 @@ subtitles_expansion/
 
 ---
 
+## Етап 7 — Озвучення (TTS, живий укр. голос) ✅
+
+**Мета:** дикторський дубляж перекладу синхронно з відео, без API-ключа.
+
+**Провайдер:** Microsoft Edge нейронні голоси через `msedge-tts` (безкоштовно,
+без ключа). Для української рівно 2 голоси: `uk-UA-OstapNeural` (чол., дефолт)
+та `uk-UA-PolinaNeural` (жін.). Формат `audio-24khz-48kbitrate-mono-mp3`.
+
+- [x] `server/tts.js` — `synthesizeCues(cues, {voice, rate, onCue, ...})`:
+  пул із 4 перевикористовуваних WebSocket-з'єднань (`Synthesizer`), reconnect+retry
+  на сталому сокеті, аудіо-кеш на рівні репліки
+  (`~/.course-subs-ua/audio/<sha256(voice+text)>.mp3`).
+- [x] `server/index.js` — `POST /tts` (SSE: `meta`→`cue`(base64 MP3)→`progress`→
+  `done`), `GET /voices`. Abort через `res.on('close')`+`res.writableFinished`.
+- [x] `extension/background.js` — `REQUEST_TTS`/`CANCEL_TTS`: воркер фетчить
+  `/tts` (обхід mixed-content) і релеїть кожну репліку в content.
+- [x] `extension/content.js` — програвання blob по `timeupdate` синхронно з cue,
+  ducking оригіналу (`volume→0.12`), обробка seek/pause/play, бейдж стану/autoplay-хінт.
+- [x] **Швидкість озвучення** (повністю client-side `playbackRate` +
+  `preservesPitch`, без ре-синтезу й без впливу на кеш):
+  - режим **Авто** — на `loadedmetadata` темп = `duration / (window·0.97)`,
+    clamp `[1, 1.8]` (лише пришвидшення, щоб репліка влізла у своє вікно);
+  - фіксовані `0.75×…2×` — точний множник;
+  - зміна на льоту перераховує темп поточного кліпу (`applyDubSpeed`).
+- [x] `extension/popup` — тумблер **Озвучення**, вибір голосу, **Швидкість**.
+- [ ] Пріоритет синтезу від поточної позиції відтворення (зараз — з cue 0).
+- [ ] Офлайн-фолбек (`ukrainian-tts`/Piper) на випадок недоступності Edge.
+
+---
+
 ## Етап 6 — Упаковка і реліз
 
 **Мета:** віддати друзям/колегам без болю.

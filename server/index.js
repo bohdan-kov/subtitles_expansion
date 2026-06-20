@@ -5,6 +5,7 @@ const cors = require('cors');
 const { parseSRT, serializeSRT } = require('./srt');
 const { translateAll } = require('./translator');
 const { readCache, writeCache } = require('./cache');
+const { synthesizeCues, VOICES } = require('./tts');
 
 const PORT = process.env.PORT || 17382;
 const app = express();
@@ -32,6 +33,83 @@ app.use(express.text({ type: '*/*', limit: '2mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0' });
+});
+
+// List of available dubbing voices (drives the popup's voice picker).
+app.get('/voices', (_req, res) => {
+  res.json({ voices: VOICES });
+});
+
+// Convert an SRT timestamp ("00:01:02,500") to seconds.
+function tsToSeconds(ts) {
+  const [h, m, rest] = ts.split(':');
+  const [s, ms] = rest.replace('.', ',').split(',');
+  return (+h) * 3600 + (+m) * 60 + (+s) + (+ms) / 1000;
+}
+
+// ── POST /tts — synthesise Ukrainian voice-over for an (already translated) SRT ─
+// Body: the UA SRT text. Query: ?voice=<ShortName>&rate=<0.5..2>.
+// Streams Server-Sent Events: `meta` (total cues) → many `cue` (base64 MP3 +
+// timing) → `progress` → `done`. The browser plays each clip in sync with its
+// subtitle and ducks the original audio underneath.
+app.post('/tts', async (req, res) => {
+  const rawSRT = req.body;
+  if (!rawSRT || typeof rawSRT !== 'string' || rawSRT.trim().length === 0) {
+    return res.status(400).json({ error: 'Request body must be a non-empty SRT string' });
+  }
+
+  const voice = req.query.voice;
+  const rate = req.query.rate ? Number(req.query.rate) : 1;
+
+  let cues;
+  try {
+    cues = parseSRT(rawSRT).map((c) => ({
+      id: c.id,
+      text: c.text.replace(/\s*\n\s*/g, ' ').trim(), // flatten multi-line cues for speech
+      startSec: tsToSeconds(c.start),
+      endSec: tsToSeconds(c.end),
+    }));
+  } catch (err) {
+    return res.status(400).json({ error: `SRT parse error: ${err.message}` });
+  }
+  if (cues.length === 0) {
+    return res.status(400).json({ error: 'No valid cues found in SRT' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+  // Abort detection: watch the *response* socket and only treat a close as an
+  // abort if the response hasn't finished normally. (Watching `req` is wrong for
+  // a POST whose body is already buffered — it emits 'close' immediately and
+  // would falsely abort the job before it starts.)
+  let aborted = false;
+  res.on('close', () => { if (!res.writableFinished) aborted = true; });
+
+  console.log(`[tts] POST /tts — ${cues.length} cues, voice=${voice || 'default'}`);
+  send('meta', { total: cues.length, voice: voice || 'default' });
+
+  try {
+    await synthesizeCues(cues, {
+      voice,
+      rate,
+      isAborted: () => aborted,
+      onCue: ({ id, startSec, endSec, mp3 }) => {
+        send('cue', { id, startSec, endSec, audio: mp3.toString('base64') });
+      },
+      onProgress: (done, total) => send('progress', { done, total }),
+    });
+    if (!aborted) send('done', { ok: true });
+  } catch (err) {
+    console.error(`[tts] failed: ${err.message}`);
+    if (!aborted) send('error', { error: err.message });
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
 });
 
 app.post('/translate', async (req, res) => {

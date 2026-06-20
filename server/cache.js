@@ -6,10 +6,18 @@ const crypto = require('crypto');
 const os = require('os');
 
 const CACHE_DIR = path.join(os.homedir(), '.course-subs-ua');
+// Synthesised speech lives in a sub-folder so it doesn't mingle with .srt files.
+const AUDIO_DIR = path.join(CACHE_DIR, 'audio');
 
 function ensureCacheDir() {
   if (!fs.existsSync(CACHE_DIR)) {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+}
+
+function ensureAudioDir() {
+  if (!fs.existsSync(AUDIO_DIR)) {
+    fs.mkdirSync(AUDIO_DIR, { recursive: true });
   }
 }
 
@@ -38,4 +46,31 @@ function writeCache(rawSRT, translatedSRT) {
   console.log(`[cache] WRITE ${path.basename(file)}`);
 }
 
-module.exports = { readCache, writeCache, hashSRT };
+// ── Audio (TTS) cache ─────────────────────────────────────────────────────────
+// One MP3 per (voice, text) pair — voice changes the timbre, text changes the
+// words; speaking rate is applied on the client (playbackRate), so it stays out
+// of the key and a cached clip is reused regardless of tempo.
+
+function audioKey(voice, text) {
+  return crypto.createHash('sha256').update(`${voice}\n${text}`).digest('hex');
+}
+
+function audioPath(key) {
+  return path.join(AUDIO_DIR, `${key}.mp3`);
+}
+
+function readAudioCache(key) {
+  ensureAudioDir();
+  const file = audioPath(key);
+  return fs.existsSync(file) ? fs.readFileSync(file) : null;
+}
+
+function writeAudioCache(key, buffer) {
+  ensureAudioDir();
+  fs.writeFileSync(audioPath(key), buffer);
+}
+
+module.exports = {
+  readCache, writeCache, hashSRT,
+  readAudioCache, writeAudioCache, audioKey,
+};

@@ -241,9 +241,90 @@ async function processURL(tabId, url) {
   }
 }
 
+// ── Voice-over (TTS) streaming proxy ──────────────────────────────────────────
+// The page is https, the bridge is http://127.0.0.1 — fetching it from a content
+// script trips mixed-content. So the service worker does the fetch and relays
+// each synthesised cue (base64 MP3) to the content script, which rebuilds it
+// into a blob and plays it in sync. One in-flight job per tab; a new request
+// (e.g. voice change) aborts the previous one.
+const ttsAbort = new Map(); // tabId → AbortController
+
+async function streamTTS(tabId, srt, voice) {
+  ttsAbort.get(tabId)?.abort();
+  const ctrl = new AbortController();
+  ttsAbort.set(tabId, ctrl);
+
+  const notify = (msg) => chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+
+  try {
+    const url = `http://127.0.0.1:17382/tts?voice=${encodeURIComponent(voice || '')}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: srt,
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentEvent = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ')) {
+          const data = JSON.parse(line.slice(6));
+          if (currentEvent === 'meta') {
+            notify({ type: 'TTS_META', total: data.total });
+          } else if (currentEvent === 'cue') {
+            notify({ type: 'TTS_CUE', id: data.id, startSec: data.startSec, endSec: data.endSec, audio: data.audio });
+          } else if (currentEvent === 'progress') {
+            notify({ type: 'TTS_PROGRESS', done: data.done, total: data.total });
+          } else if (currentEvent === 'done') {
+            notify({ type: 'TTS_DONE' });
+          } else if (currentEvent === 'error') {
+            throw new Error(data.error);
+          }
+          currentEvent = null;
+        }
+      }
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return; // superseded by a newer request — silent
+    console.error('[bg] TTS error:', err.message);
+    notify({ type: 'TTS_ERROR', error: err.message });
+  } finally {
+    if (ttsAbort.get(tabId) === ctrl) ttsAbort.delete(tabId);
+  }
+}
+
 // ── Sync state to content script on init ─────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Content script asks to synthesise voice-over for the (translated) SRT.
+  if (msg.type === 'REQUEST_TTS') {
+    const tabId = sender.tab?.id;
+    if (tabId) streamTTS(tabId, msg.srt, msg.voice);
+    return false;
+  }
+  // Content script asks to cancel an in-flight voice-over (dub turned off).
+  if (msg.type === 'CANCEL_TTS') {
+    const tabId = sender.tab?.id;
+    if (tabId) { ttsAbort.get(tabId)?.abort(); ttsAbort.delete(tabId); }
+    return false;
+  }
   // Popup: fetch the live job list for the progress view.
   if (msg.type === 'GET_JOBS') {
     sendResponse({ jobs: [...jobs.values()].sort(jobSort) });
@@ -295,6 +376,9 @@ chrome.webRequest.onBeforeRequest.addListener(
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     tabState.delete(tabId);
+    // Cancel any voice-over still streaming for the old page.
+    ttsAbort.get(tabId)?.abort();
+    ttsAbort.delete(tabId);
     // Keep in-flight translations — they continue in the background across
     // navigation, so dropping them here would hide a download that's still
     // running. Only clear this tab's already-finished/errored jobs.
@@ -308,4 +392,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabState.delete(tabId);
   deleteTabJobs(tabId);
+  ttsAbort.get(tabId)?.abort();
+  ttsAbort.delete(tabId);
 });

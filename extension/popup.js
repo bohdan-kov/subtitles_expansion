@@ -5,6 +5,9 @@ const SERVER_HEALTH = 'http://127.0.0.1:17382/health';
 const enabledToggle = document.getElementById('enabledToggle');
 const modeSelect = document.getElementById('modeSelect');
 const layoutSelect = document.getElementById('layoutSelect');
+const dubToggle = document.getElementById('dubToggle');
+const voiceSelect = document.getElementById('voiceSelect');
+const speedSelect = document.getElementById('speedSelect');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const jobsList = document.getElementById('jobsList');
@@ -13,11 +16,25 @@ const clearJobsBtn = document.getElementById('clearJobs');
 
 // ── Load saved settings ──────────────────────────────────────────────────────
 
-chrome.storage.sync.get({ enabled: true, mode: 'ua', layout: 'triple' }, (settings) => {
-  enabledToggle.checked = settings.enabled;
-  modeSelect.value = settings.mode;
-  layoutSelect.value = settings.layout;
-});
+chrome.storage.sync.get(
+  { enabled: true, mode: 'ua', layout: 'triple', dub: false, voice: 'uk-UA-OstapNeural', dubSpeed: 'auto' },
+  (settings) => {
+    enabledToggle.checked = settings.enabled;
+    modeSelect.value = settings.mode;
+    layoutSelect.value = settings.layout;
+    dubToggle.checked = settings.dub;
+    voiceSelect.value = settings.voice;
+    speedSelect.value = settings.dubSpeed;
+  }
+);
+
+// Push a settings patch to storage and the active tab's content script.
+function pushSetting(patch) {
+  chrome.storage.sync.set(patch);
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (tab?.id) chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS', ...patch }).catch(() => {});
+  });
+}
 
 // ── Save on change ───────────────────────────────────────────────────────────
 
@@ -51,6 +68,10 @@ layoutSelect.addEventListener('change', () => {
     }
   });
 });
+
+dubToggle.addEventListener('change', () => pushSetting({ dub: dubToggle.checked }));
+voiceSelect.addEventListener('change', () => pushSetting({ voice: voiceSelect.value }));
+speedSelect.addEventListener('change', () => pushSetting({ dubSpeed: speedSelect.value }));
 
 // ── Server health check ──────────────────────────────────────────────────────
 

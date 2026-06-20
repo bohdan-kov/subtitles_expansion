@@ -152,6 +152,11 @@
 
     .row .label { flex-shrink: 0; }
 
+    .hint {
+      font-size: 10px; color: #999; line-height: 1.4;
+      padding: 2px 0 0;
+    }
+
     footer {
       padding: 8px 14px;
       font-size: 10px; color: #999; text-align: center;
@@ -190,6 +195,38 @@
         <option value="single">1 рядок</option>
       </select>
     </div>
+  </div>
+
+  <div class="section">
+    <div class="row">
+      <span class="label">Озвучення</span>
+      <label class="toggle">
+        <input type="checkbox" id="dubToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="row">
+      <span class="label">Голос</span>
+      <select id="voiceSelect">
+        <option value="uk-UA-OstapNeural">Остап (чол.)</option>
+        <option value="uk-UA-PolinaNeural">Поліна (жін.)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <span class="label">Швидкість</span>
+      <select id="speedSelect">
+        <option value="auto">Авто (під час репліки)</option>
+        <option value="0.75">0.75×</option>
+        <option value="1">1×</option>
+        <option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option>
+        <option value="1.75">1.75×</option>
+        <option value="2">2×</option>
+      </select>
+    </div>
+    <div class="hint">Жива нейронна озвучка Microsoft Edge. Оригінал приглушується під час реплік. У режимі «Авто» темп підлаштовується під тривалість репліки.</div>
   </div>
 
   <div class="section">
