@@ -46,6 +46,33 @@ function writeCache(rawSRT, translatedSRT) {
   console.log(`[cache] WRITE ${path.basename(file)}`);
 }
 
+// ── Persistent transliteration dictionary ─────────────────────────────────────
+// One global, ever-growing {lowercased term → Ukrainian reading} map shared
+// across every video. Kept-English terms recur constantly (API, token, prompt…),
+// so once a term is transliterated we never pay GPT for it again. It lives as a
+// visible file in the project (`server/translit-dict.json`), not the hidden
+// cache dir, so you can open it and hand-tune any reading — edits stick.
+
+const TRANSLIT_DICT_FILE = path.join(__dirname, 'translit-dict.json');
+
+function readTranslitDict() {
+  if (!fs.existsSync(TRANSLIT_DICT_FILE)) return {};
+  try {
+    const map = JSON.parse(fs.readFileSync(TRANSLIT_DICT_FILE, 'utf8'));
+    return (map && typeof map === 'object' && !Array.isArray(map)) ? map : {};
+  } catch {
+    return {}; // corrupt dict — start fresh rather than break dubbing
+  }
+}
+
+function writeTranslitDict(map) {
+  // Sorted keys keep the file diff-friendly and easy to scan when hand-editing.
+  const sorted = {};
+  for (const k of Object.keys(map).sort()) sorted[k] = map[k];
+  fs.writeFileSync(TRANSLIT_DICT_FILE, JSON.stringify(sorted, null, 2) + '\n', 'utf8');
+  console.log(`[cache] WRITE translit-dict.json (${Object.keys(sorted).length} terms)`);
+}
+
 // ── Audio (TTS) cache ─────────────────────────────────────────────────────────
 // One MP3 per (voice, text) pair — voice changes the timbre, text changes the
 // words; speaking rate is applied on the client (playbackRate), so it stays out
@@ -72,5 +99,6 @@ function writeAudioCache(key, buffer) {
 
 module.exports = {
   readCache, writeCache, hashSRT,
+  readTranslitDict, writeTranslitDict,
   readAudioCache, writeAudioCache, audioKey,
 };

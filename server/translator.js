@@ -12,6 +12,12 @@ const MAX_INPUT_CHARS = 4500;
 
 const SYSTEM_PROMPT = `You are a subtitle translator. Translate to Ukrainian. Keep technical terms in English. Return ONLY a raw JSON array [{id,text}], no explanation, no markdown.`;
 
+// Transliteration is decoupled from translation: kept-English terms are collected
+// at dub time and only the ones missing from the persistent dictionary are sent
+// here, in one small batch. The voice reads the Cyrillic spelling so terms like
+// "API"/"token" sound right; the on-screen subtitle keeps the English original.
+const TRANSLIT_SYSTEM_PROMPT = `You convert English technical terms into how a Ukrainian text-to-speech voice should pronounce them. Input is a JSON array of terms. Return ONLY a raw JSON object {"<term>":"<Cyrillic phonetic reading>"} (no explanation, no markdown). Keys must be EXACTLY the input terms. Read acronyms letter-by-letter in Cyrillic: "API" -> "Ей-Пі-Ай", "JSON" -> "Джейсон", "SDK" -> "Ес-Ді-Кей", "URL" -> "Ю-Ар-Ел". Read normal words by pronunciation: "token" -> "токен", "prompt" -> "промпт", "streaming" -> "стрімінг", "embeddings" -> "ембедінгс".`;
+
 // The model sometimes double-escapes line breaks, so a literal "\n" (backslash + n)
 // survives JSON.parse and shows up as text in the overlay. Turn such literal escape
 // sequences back into real characters.
@@ -75,6 +81,44 @@ async function translateAll(cues, onProgress) {
     })
   ));
   return parts.flat();
+}
+
+// ── Transliterate a batch of new terms (one small dedicated call) ─────────────
+// `terms` is a deduped list of kept-English terms NOT yet in the persistent
+// dictionary. Returns {term → Cyrillic reading}. On failure returns {} so dubbing
+// just falls back to speaking the terms as-is.
+async function transliterateTerms(terms) {
+  if (!Array.isArray(terms) || terms.length === 0) return {};
+
+  const userMessage = JSON.stringify(terms);
+  console.log(`[translit] → ${terms.length} new term(s): ${terms.slice(0, 12).join(', ')}${terms.length > 12 ? '…' : ''}`);
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const completion = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: TRANSLIT_SYSTEM_PROMPT },
+          { role: 'user', content: userMessage },
+        ],
+      });
+
+      const raw = completion.choices[0].message.content.trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const map = JSON.parse(cleaned);
+      if (!map || typeof map !== 'object' || Array.isArray(map)) {
+        throw new Error('Expected a JSON object of term→reading');
+      }
+      const usage = completion.usage;
+      console.log(`[translit] ✓ ${Object.keys(map).length} reading(s) | in:${usage?.prompt_tokens} out:${usage?.completion_tokens} tokens`);
+      return map;
+    } catch (err) {
+      console.error(`[translit] ✗ attempt ${attempt} failed: ${err.message}`);
+      if (attempt === 2) return {};
+      await sleep(2000);
+    }
+  }
+  return {};
 }
 
 async function translateBatch(cues, isRetry = false) {
@@ -168,4 +212,4 @@ async function translateBatch(cues, isRetry = false) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-module.exports = { translateAll };
+module.exports = { translateAll, transliterateTerms };

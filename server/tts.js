@@ -27,6 +27,49 @@ function resolveVoice(voice) {
   return VOICES.some((v) => v.id === voice) ? voice : DEFAULT_VOICE;
 }
 
+// ── Transliteration of kept-English terms ─────────────────────────────────────
+// The translator hands us a {term → Ukrainian reading} map. English terms stay
+// Latin on screen (good for reading) but Edge's UA voices mispronounce them, so
+// for *speech only* we swap each term for its Cyrillic reading.
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Pull the kept-English terms out of translated cue texts: any run that contains
+// a Latin letter (so "max_tokens", "gpt-5-nano", "Node.js", "C++" survive intact),
+// with trailing sentence punctuation trimmed. Pure numbers are skipped. Used at
+// dub time to decide which terms still need a reading from the dictionary.
+function extractLatinTerms(texts) {
+  const re = /[A-Za-z][A-Za-z0-9_+#.-]*/g;
+  const out = [];
+  for (const text of texts) {
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const term = m[0].replace(/[.\-]+$/, ''); // drop trailing dot/hyphen (e.g. "API.")
+      if (term.length >= 2) out.push(term);
+    }
+  }
+  return out;
+}
+
+// Compile the whole glossary into a single replacer (built once per job, reused
+// across all cues). Longest terms match first so "max_tokens" wins over "token";
+// the boundaries treat letters, digits and `_` as word chars, so we never mangle
+// a term sitting inside a snake_case identifier. Returns null when there's nothing
+// to do, so callers can cheaply skip.
+function buildTranslitReplacer(map) {
+  const terms = map ? Object.keys(map).filter((t) => t && map[t]) : [];
+  if (terms.length === 0) return null;
+  terms.sort((a, b) => b.length - a.length);
+
+  const lookup = new Map(terms.map((t) => [t.toLowerCase(), map[t]]));
+  const alternation = terms.map(escapeRegExp).join('|');
+  const re = new RegExp(`(?<![A-Za-z0-9_])(?:${alternation})(?![A-Za-z0-9_])`, 'gi');
+
+  return (text) => text.replace(re, (m) => lookup.get(m.toLowerCase()) ?? m);
+}
+
 // ── One warm connection ───────────────────────────────────────────────────────
 // Wraps a single MsEdgeTTS instance pinned to one voice. Synthesis requests are
 // run one at a time (the caller serialises via the pool). A dropped/idle socket
@@ -90,8 +133,9 @@ class Synthesizer {
 
 const POOL_SIZE = 4;
 
-async function synthesizeCues(cues, { voice, rate, onCue, onProgress, isAborted } = {}) {
+async function synthesizeCues(cues, { voice, rate, translit, onCue, onProgress, isAborted } = {}) {
   const useVoice = resolveVoice(voice);
+  const replacer = buildTranslitReplacer(translit);
   const workers = [];
   let next = 0;
   let done = 0;
@@ -107,14 +151,19 @@ async function synthesizeCues(cues, { voice, rate, onCue, onProgress, isAborted 
       if (i >= total) return;
       const cue = cues[i];
 
+      // What the voice actually says: English terms swapped for their Ukrainian
+      // reading. Falls back to the raw text when there's no glossary. The audio
+      // cache is keyed on this spoken text so a clip always matches its sound.
+      const spoken = replacer ? replacer(cue.text) : cue.text;
+
       let mp3;
-      const key = audioKey(useVoice, cue.text);
+      const key = audioKey(useVoice, spoken);
       const cached = readAudioCache(key);
       if (cached) {
         mp3 = cached;
       } else {
         try {
-          mp3 = await worker.synth(cue.text, rate);
+          mp3 = await worker.synth(spoken, rate);
           writeAudioCache(key, mp3);
         } catch (err) {
           // One bad cue shouldn't sink the whole dub — skip it and carry on.
@@ -139,4 +188,4 @@ async function synthesizeCues(cues, { voice, rate, onCue, onProgress, isAborted 
   }
 }
 
-module.exports = { synthesizeCues, VOICES, DEFAULT_VOICE, resolveVoice };
+module.exports = { synthesizeCues, extractLatinTerms, VOICES, DEFAULT_VOICE, resolveVoice };

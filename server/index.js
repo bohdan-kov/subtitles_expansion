@@ -3,9 +3,9 @@
 const express = require('express');
 const cors = require('cors');
 const { parseSRT, serializeSRT } = require('./srt');
-const { translateAll } = require('./translator');
-const { readCache, writeCache } = require('./cache');
-const { synthesizeCues, VOICES } = require('./tts');
+const { translateAll, transliterateTerms } = require('./translator');
+const { readCache, writeCache, readTranslitDict, writeTranslitDict } = require('./cache');
+const { synthesizeCues, extractLatinTerms, VOICES } = require('./tts');
 
 const PORT = process.env.PORT || 17382;
 const app = express();
@@ -93,10 +93,38 @@ app.post('/tts', async (req, res) => {
   console.log(`[tts] POST /tts — ${cues.length} cues, voice=${voice || 'default'}`);
   send('meta', { total: cues.length, voice: voice || 'default' });
 
+  // Make sure every kept-English term in these cues has a Ukrainian reading.
+  // Pull the terms, keep only those missing from the persistent dictionary, ask
+  // GPT for just those (one small call — usually skipped once the dict is warm),
+  // then persist. The voice reads the Cyrillic; the subtitle stays English.
+  const translit = readTranslitDict();
+  try {
+    const seen = new Set();
+    const unknown = [];
+    for (const term of extractLatinTerms(cues.map((c) => c.text))) {
+      const k = term.toLowerCase();
+      if (translit[k] || seen.has(k)) continue;
+      seen.add(k);
+      unknown.push(term);
+    }
+    console.log(`[tts] terms: ${seen.size} unique, ${unknown.length} new`);
+    if (unknown.length && !aborted) {
+      const fresh = await transliterateTerms(unknown);
+      let added = 0;
+      for (const [term, reading] of Object.entries(fresh)) {
+        if (reading && typeof reading === 'string') { translit[term.toLowerCase()] = reading; added++; }
+      }
+      if (added) writeTranslitDict(translit);
+    }
+  } catch (err) {
+    console.warn(`[tts] translit fill failed: ${err.message} — speaking terms as-is`);
+  }
+
   try {
     await synthesizeCues(cues, {
       voice,
       rate,
+      translit,
       isAborted: () => aborted,
       onCue: ({ id, startSec, endSec, mp3 }) => {
         send('cue', { id, startSec, endSec, audio: mp3.toString('base64') });
