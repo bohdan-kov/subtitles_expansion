@@ -53,7 +53,7 @@ function extractLatinTerms(texts) {
   return out;
 }
 
-// Compile the whole glossary into a single replacer (built once per job, reused
+// Compile the whole transliteration dictionary into a single replacer (built once per job, reused
 // across all cues). Longest terms match first so "max_tokens" wins over "token";
 // the boundaries treat letters, digits and `_` as word chars, so we never mangle
 // a term sitting inside a snake_case identifier. Returns null when there's nothing
@@ -152,7 +152,7 @@ async function synthesizeCues(cues, { voice, rate, translit, onCue, onProgress, 
       const cue = cues[i];
 
       // What the voice actually says: English terms swapped for their Ukrainian
-      // reading. Falls back to the raw text when there's no glossary. The audio
+      // reading. Falls back to the raw text when there's no dictionary. The audio
       // cache is keyed on this spoken text so a clip always matches its sound.
       const spoken = replacer ? replacer(cue.text) : cue.text;
 

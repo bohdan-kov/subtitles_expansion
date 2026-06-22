@@ -10,7 +10,7 @@ const client = new OpenAI({
 const MODEL = 'gpt-5-nano';
 const MAX_INPUT_CHARS = 4500;
 
-const SYSTEM_PROMPT = `You are a subtitle translator. Translate to Ukrainian. Keep technical terms in English. Return ONLY a raw JSON array [{id,text}], no explanation, no markdown.`;
+const SYSTEM_PROMPT = `You are a subtitle translator. Translate every cue to Ukrainian. Keep technical terms in English. You MUST return one item for EVERY input cue — exactly the same count and the same ids, never dropping, merging or reordering cues. Return ONLY a raw JSON object {"items":[{"id":<id>,"text":"<translation>"}]}, no explanation, no markdown.`;
 
 // Transliteration is decoupled from translation: kept-English terms are collected
 // at dub time and only the ones missing from the persistent dictionary are sent
@@ -97,6 +97,8 @@ async function transliterateTerms(terms) {
     try {
       const completion = await client.chat.completions.create({
         model: MODEL,
+        reasoning_effort: 'minimal',
+        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: TRANSLIT_SYSTEM_PROMPT },
           { role: 'user', content: userMessage },
@@ -131,6 +133,13 @@ async function translateBatch(cues, isRetry = false) {
     try {
       const requestPayload = {
         model: MODEL,
+        // Translation needs no chain-of-thought; minimal reasoning cuts the hidden
+        // reasoning tokens (billed as output) and leaves more budget for the actual
+        // answer, which also reduces truncated/dropped cues.
+        reasoning_effort: 'minimal',
+        // JSON mode guarantees syntactically valid output (no markdown fences, no
+        // parse-failure retries). Pairs with the object-shaped SYSTEM_PROMPT.
+        response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userMessage },
@@ -154,7 +163,7 @@ async function translateBatch(cues, isRetry = false) {
 
       let parsed = JSON.parse(cleaned);
       if (!Array.isArray(parsed)) {
-        parsed = parsed.cues || parsed.subtitles || parsed.translations || Object.values(parsed)[0];
+        parsed = parsed.items || parsed.cues || parsed.subtitles || parsed.translations || Object.values(parsed)[0];
       }
 
       if (!Array.isArray(parsed)) {
