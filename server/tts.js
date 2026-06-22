@@ -93,15 +93,12 @@ class Synthesizer {
     this.tts = null;
   }
 
-  _streamOnce(text, rate) {
+  _streamOnce(text) {
     return new Promise((resolve, reject) => {
-      // Pass prosody only when non-default so the SSML stays minimal. Edge's
-      // neural voices already sound natural at their default rate; we expose
-      // `rate` mainly so a cue can be nudged to fit its on-screen window.
-      const opts = {};
-      if (rate && rate !== 1) opts.rate = rate;
-
-      const { audioStream } = this.tts.toStream(text, opts);
+      // Synthesise at the voice's natural rate. Tempo is handled entirely on the
+      // client via playbackRate, so it stays out of both the SSML and the audio
+      // cache key (a clip is reused regardless of how fast it's later played).
+      const { audioStream } = this.tts.toStream(text);
       const chunks = [];
       audioStream.on('data', (c) => chunks.push(c));
       audioStream.on('end', () => resolve(Buffer.concat(chunks)));
@@ -109,15 +106,15 @@ class Synthesizer {
     });
   }
 
-  async synth(text, rate) {
+  async synth(text) {
     await this._ensure();
     try {
-      return await this._streamOnce(text, rate);
+      return await this._streamOnce(text);
     } catch (err) {
       // Stale or closed socket — rebuild the connection and try one more time.
       this._reset();
       await this._ensure();
-      return await this._streamOnce(text, rate);
+      return await this._streamOnce(text);
     }
   }
 
@@ -133,7 +130,7 @@ class Synthesizer {
 
 const POOL_SIZE = 4;
 
-async function synthesizeCues(cues, { voice, rate, translit, onCue, onProgress, isAborted } = {}) {
+async function synthesizeCues(cues, { voice, translit, onCue, onProgress, isAborted } = {}) {
   const useVoice = resolveVoice(voice);
   const replacer = buildTranslitReplacer(translit);
   const workers = [];
@@ -163,7 +160,7 @@ async function synthesizeCues(cues, { voice, rate, translit, onCue, onProgress, 
         mp3 = cached;
       } else {
         try {
-          mp3 = await worker.synth(spoken, rate);
+          mp3 = await worker.synth(spoken);
           writeAudioCache(key, mp3);
         } catch (err) {
           // One bad cue shouldn't sink the whole dub — skip it and carry on.

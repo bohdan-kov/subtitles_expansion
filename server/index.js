@@ -15,6 +15,24 @@ const app = express();
 // waits for the first one instead of starting a duplicate translation job.
 const inFlight = new Map();
 
+// Common English function words that occasionally slip through untranslated into
+// the Ukrainian text. They are NOT kept-English technical terms, so we never want
+// to transliterate them: doing so wastes a GPT call and pollutes the dictionary
+// (the model tends to *translate* them — "and"→"і" — instead of giving a reading).
+// Genuine technical lowercase terms ("token", "prompt", "async") are deliberately
+// absent so they still get a reading.
+const TRANSLIT_STOPWORDS = new Set([
+  'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'so', 'as', 'of', 'to',
+  'in', 'on', 'at', 'by', 'for', 'from', 'with', 'without', 'into', 'onto', 'over',
+  'the', 'this', 'that', 'these', 'those', 'it', 'its', 'is', 'are', 'was', 'were',
+  'be', 'been', 'being', 'am', 'do', 'does', 'did', 'has', 'have', 'had',
+  'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
+  'not', 'no', 'yes', 'we', 'you', 'your', 'our', 'they', 'them', 'their',
+  'he', 'she', 'his', 'her', 'my', 'me', 'us', 'all', 'any', 'some', 'each',
+  'here', 'there', 'when', 'where', 'what', 'which', 'who', 'how', 'why',
+  'than', 'about', 'just', 'also', 'very', 'more', 'most', 'such', 'only',
+]);
+
 // Chrome Private Network Access headers must come BEFORE cors() middleware
 // so they are included in OPTIONS preflight responses too.
 app.use((_req, res, next) => {
@@ -48,7 +66,7 @@ function tsToSeconds(ts) {
 }
 
 // ── POST /tts — synthesise Ukrainian voice-over for an (already translated) SRT ─
-// Body: the UA SRT text. Query: ?voice=<ShortName>&rate=<0.5..2>.
+// Body: the UA SRT text. Query: ?voice=<ShortName>. (Tempo is client-side only.)
 // Streams Server-Sent Events: `meta` (total cues) → many `cue` (base64 MP3 +
 // timing) → `progress` → `done`. The browser plays each clip in sync with its
 // subtitle and ducks the original audio underneath.
@@ -59,7 +77,6 @@ app.post('/tts', async (req, res) => {
   }
 
   const voice = req.query.voice;
-  const rate = req.query.rate ? Number(req.query.rate) : 1;
 
   let cues;
   try {
@@ -103,7 +120,7 @@ app.post('/tts', async (req, res) => {
     const unknown = [];
     for (const term of extractLatinTerms(cues.map((c) => c.text))) {
       const k = term.toLowerCase();
-      if (translit[k] || seen.has(k)) continue;
+      if (translit[k] || seen.has(k) || TRANSLIT_STOPWORDS.has(k)) continue;
       seen.add(k);
       unknown.push(term);
     }
@@ -123,7 +140,6 @@ app.post('/tts', async (req, res) => {
   try {
     await synthesizeCues(cues, {
       voice,
-      rate,
       translit,
       isAborted: () => aborted,
       onCue: ({ id, startSec, endSec, mp3 }) => {
