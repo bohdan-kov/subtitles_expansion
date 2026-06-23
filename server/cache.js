@@ -73,6 +73,31 @@ function writeTranslitDict(map) {
   console.log(`[cache] WRITE translit-dict.json (${Object.keys(sorted).length} terms)`);
 }
 
+// ── Transliteration skip-list (negative cache) ────────────────────────────────
+// Terms the LLM gatekeeper judged NOT worth transliterating — ordinary English
+// words, sentence fragments, transcription noise. Kept in a separate file so the
+// main dictionary stays a clean, hand-editable list of real readings. Caching the
+// rejections means each junk term costs exactly one GPT call ever, not one per
+// video. Stored as a sorted JSON array of lowercased terms.
+
+const TRANSLIT_SKIP_FILE = path.join(__dirname, 'translit-skip.json');
+
+function readTranslitSkip() {
+  if (!fs.existsSync(TRANSLIT_SKIP_FILE)) return new Set();
+  try {
+    const arr = JSON.parse(fs.readFileSync(TRANSLIT_SKIP_FILE, 'utf8'));
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writeTranslitSkip(set) {
+  const sorted = [...set].sort();
+  fs.writeFileSync(TRANSLIT_SKIP_FILE, JSON.stringify(sorted, null, 2) + '\n', 'utf8');
+  console.log(`[cache] WRITE translit-skip.json (${sorted.length} terms)`);
+}
+
 // ── Audio (TTS) cache ─────────────────────────────────────────────────────────
 // One MP3 per (voice, text) pair — voice changes the timbre, text changes the
 // words; speaking rate is applied on the client (playbackRate), so it stays out
@@ -100,5 +125,6 @@ function writeAudioCache(key, buffer) {
 module.exports = {
   readCache, writeCache, hashSRT,
   readTranslitDict, writeTranslitDict,
+  readTranslitSkip, writeTranslitSkip,
   readAudioCache, writeAudioCache, audioKey,
 };

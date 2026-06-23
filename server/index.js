@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { parseSRT, serializeSRT } = require('./srt');
 const { translateAll, transliterateTerms } = require('./translator');
-const { readCache, writeCache, readTranslitDict, writeTranslitDict } = require('./cache');
+const { readCache, writeCache, readTranslitDict, writeTranslitDict, readTranslitSkip, writeTranslitSkip } = require('./cache');
 const { synthesizeCues, extractLatinTerms, VOICES } = require('./tts');
 
 const PORT = process.env.PORT || 17382;
@@ -115,12 +115,15 @@ app.post('/tts', async (req, res) => {
   // GPT for just those (one small call — usually skipped once the dict is warm),
   // then persist. The voice reads the Cyrillic; the subtitle stays English.
   const translit = readTranslitDict();
+  const skip = readTranslitSkip();
   try {
     const seen = new Set();
     const unknown = [];
     for (const term of extractLatinTerms(cues.map((c) => c.text))) {
       const k = term.toLowerCase();
-      if (translit[k] || seen.has(k) || TRANSLIT_STOPWORDS.has(k)) continue;
+      // Skip if already known (has a reading), already rejected (negative cache),
+      // a common function word, or seen this batch.
+      if (translit[k] || skip.has(k) || TRANSLIT_STOPWORDS.has(k) || seen.has(k)) continue;
       seen.add(k);
       unknown.push(term);
     }
@@ -128,10 +131,24 @@ app.post('/tts', async (req, res) => {
     if (unknown.length && !aborted) {
       const fresh = await transliterateTerms(unknown);
       let added = 0;
-      for (const [term, reading] of Object.entries(fresh)) {
-        if (reading && typeof reading === 'string') { translit[term.toLowerCase()] = reading; added++; }
+      let rejected = 0;
+      // The gatekeeper returns a phonetic reading for real terms and "" for
+      // ordinary words / noise. Persist BOTH outcomes: readings to the dict,
+      // rejections (empty or omitted) to the skip-list — so a junk term costs
+      // exactly one GPT call ever, not one per video.
+      for (const term of unknown) {
+        const k = term.toLowerCase();
+        const reading = fresh[term];
+        if (typeof reading === 'string' && reading.trim()) {
+          translit[k] = reading.trim();
+          added++;
+        } else {
+          skip.add(k);
+          rejected++;
+        }
       }
       if (added) writeTranslitDict(translit);
+      if (rejected) writeTranslitSkip(skip);
     }
   } catch (err) {
     console.warn(`[tts] translit fill failed: ${err.message} — speaking terms as-is`);
